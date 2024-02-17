@@ -1,5 +1,8 @@
 #!/bin/bash
 
+## exit in case of any error
+set -e
+
 ## update version (patch)
 BASE_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
 echo "Current Version: $BASE_VERSION"
@@ -28,4 +31,11 @@ docker push $AWS_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/my-repo:${NEW_VERSION}
 docker push $AWS_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/my-repo:latest
 
 ## ecs force new deployment
-aws ecs update-service --cluster my-ecs-cluster --service my-ecs-service --force-new-deployment
+AWS_PAGER="" aws ecs update-service --cluster my-ecs-cluster --service my-ecs-service --force-new-deployment
+
+## await for the service to be stable
+echo "Waiting for deploy to finish..."
+aws ecs wait services-stable --cluster my-ecs-cluster --services my-ecs-service
+
+echo
+echo "Version $NEW_VERSION is now deployed!"

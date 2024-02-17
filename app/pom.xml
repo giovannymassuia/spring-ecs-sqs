@@ -12,7 +12,7 @@
 
     <groupId>io.giovannymassuia</groupId>
     <artifactId>spring-ecs-sqs</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.5</version>
     <name>app</name>
     <description>app</description>
 
