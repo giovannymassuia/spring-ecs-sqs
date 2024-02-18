@@ -28,6 +28,8 @@ AWS_ACCOUNT=$(aws sts get-caller-identity --query "Account" --output text)
 docker tag my-app:latest $AWS_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/my-repo:${NEW_VERSION}
 docker tag my-app:latest $AWS_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/my-repo:latest
 
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $AWS_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com
+
 ## docker push
 docker push $AWS_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/my-repo:${NEW_VERSION}
 docker push $AWS_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/my-repo:latest
