@@ -3,6 +3,7 @@ import { Construct } from 'constructs';
 import * as alb from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as codedeploy from 'aws-cdk-lib/aws-codedeploy';
 
 export class CdkStack extends cdk.Stack {
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -56,32 +57,94 @@ export class CdkStack extends cdk.Stack {
             portMappings: [{ containerPort: 8080 }]
         });
 
-        const fargateService = new ecs.FargateService(this, 'my-service', {
+        const fargateService = new ecs.FargateService(this, 'my-service-canary', {
             cluster: ecsCluster,
-            serviceName: 'my-ecs-service',
+            serviceName: 'my-ecs-service-canary',
             desiredCount: 1,
             taskDefinition,
             vpcSubnets: {
                 subnets: vpc.privateSubnets
+            },
+            deploymentController: {
+                type: ecs.DeploymentControllerType.CODE_DEPLOY
             }
         });
 
-        const targetGroup = new alb.ApplicationTargetGroup(this, 'target-group-v2', {
+        const blueTargetGroup = new alb.ApplicationTargetGroup(this, 'blue-tg', {
             vpc,
-            targetGroupName: 'my-app-tg-spring',
-            protocol: alb.ApplicationProtocol.HTTP,
+            targetGroupName: 'blue-tg',
             port: 8080,
+            protocol: alb.ApplicationProtocol.HTTP,
+            healthCheck: {
+                path: '/actuator/health'
+            },
+            targets: [fargateService]
+        });
+        const greenTargetGroup = new alb.ApplicationTargetGroup(this, 'green-tg', {
+            vpc,
+            targetGroupName: 'green-tg',
+            port: 8080,
+            protocol: alb.ApplicationProtocol.HTTP,
             healthCheck: {
                 path: '/actuator/health'
             },
             targets: [fargateService]
         });
 
-        const albRule = new alb.ApplicationListenerRule(this, 'my-app-rule', {
+        const prodListenerRule = new alb.ApplicationListenerRule(this, 'prod-listener-rule', {
             listener,
-            priority: 10,
+            priority: 11,
             conditions: [alb.ListenerCondition.pathPatterns(['/*'])],
-            action: alb.ListenerAction.forward([targetGroup])
+            action: alb.ListenerAction.weightedForward([
+                { targetGroup: blueTargetGroup, weight: 100 },
+                { targetGroup: greenTargetGroup, weight: 0 }
+            ])
+        });
+
+        const testListener = loadBalancer.addListener('TestListener', {
+            port: 8080,
+            protocol: alb.ApplicationProtocol.HTTP,
+            defaultAction: alb.ListenerAction.fixedResponse(404, {
+                contentType: 'text/plain',
+                messageBody: 'Not Found'
+            })
+        });
+
+        const testListenerRule = new alb.ApplicationListenerRule(this, 'test-listener-rule', {
+            listener: testListener,
+            priority: 11,
+            conditions: [alb.ListenerCondition.pathPatterns(['/test'])],
+            action: alb.ListenerAction.forward([greenTargetGroup])
+        });
+
+        const customDeploymentConfig = new codedeploy.EcsDeploymentConfig(this, 'CustomDeploymentConfig', {
+            deploymentConfigName: 'CustomDeploymentConfig',
+            trafficRouting: codedeploy.TrafficRouting.timeBasedLinear({
+                interval: cdk.Duration.minutes(1),
+                percentage: 20
+            })
+        });
+
+        const ecsDeploymentGroup = new codedeploy.EcsDeploymentGroup(this, 'EcsDeploymentGroup', {
+            application: new codedeploy.EcsApplication(this, 'ecs-app', {
+                applicationName: 'my-ecs-application'
+            }),
+            deploymentGroupName: 'my-ecs-deployment-group',
+            deploymentConfig: customDeploymentConfig,
+            service: fargateService,
+            // alarms: [alarm],
+            autoRollback: {
+                failedDeployment: true,
+                stoppedDeployment: true
+            },
+            blueGreenDeploymentConfig: {
+                blueTargetGroup,
+                greenTargetGroup,
+                listener,
+                testListener
+                // terminationWaitTime: cdk.Duration.minutes(10),
+                // deploymentApprovalWaitTime: cdk.Duration.minutes(10)
+            }
         });
     }
 }
